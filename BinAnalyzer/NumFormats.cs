@@ -26,76 +26,8 @@ namespace TI30XDev
             formats.Add("BigEndian32", num => Universal(num, false, false, 4));
             formats.Add("BigEndian32Rev", num => Universal(num, false, true, 4));
         }
-        public static byte[] LittleEndian24Rev(long num)
-        {
-            byte[] ret = new byte[3];
-            if (BitConverter.IsLittleEndian)
-            {
-                ret[0] = reverseBitOrder(BitConverter.GetBytes(num)[0]);
-                ret[1] = reverseBitOrder(BitConverter.GetBytes(num)[1]);
-                ret[2] = reverseBitOrder(BitConverter.GetBytes(num)[2]);
-            }
-            else
-            {
-                ret[0] = reverseBitOrder(BitConverter.GetBytes(num)[2]);
-                ret[1] = reverseBitOrder(BitConverter.GetBytes(num)[1]);
-                ret[2] = reverseBitOrder(BitConverter.GetBytes(num)[0]);
-            }
-            return ret;
-        }
-        public static byte[] LittleEndian24(long num)
-        {
-            byte[] ret = new byte[3];
-            if (BitConverter.IsLittleEndian)
-            {
-                ret[0] = BitConverter.GetBytes(num)[0];
-                ret[1] = BitConverter.GetBytes(num)[1];
-                ret[2] = BitConverter.GetBytes(num)[2];
-            }
-            else
-            {
-                ret[0] = BitConverter.GetBytes(num)[2];
-                ret[1] = BitConverter.GetBytes(num)[1];
-                ret[2] = BitConverter.GetBytes(num)[0];
-            }
-            return ret;
-        }
-
-        public static byte[] BigEndian24Rev(long num)
-        {
-            byte[] ret = new byte[3];
-            if (!BitConverter.IsLittleEndian)
-            {
-                ret[0] = reverseBitOrder(BitConverter.GetBytes(num)[0]);
-                ret[1] = reverseBitOrder(BitConverter.GetBytes(num)[1]);
-                ret[2] = reverseBitOrder(BitConverter.GetBytes(num)[2]);
-            }
-            else
-            {
-                ret[0] = reverseBitOrder(BitConverter.GetBytes(num)[2]);
-                ret[1] = reverseBitOrder(BitConverter.GetBytes(num)[1]);
-                ret[2] = reverseBitOrder(BitConverter.GetBytes(num)[0]);
-            }
-            return ret;
-        }
-        public static byte[] BigEndian24(long num)
-        {
-            byte[] ret = new byte[3];
-            if (!BitConverter.IsLittleEndian)
-            {
-                ret[0] = BitConverter.GetBytes(num)[0];
-                ret[1] = BitConverter.GetBytes(num)[1];
-                ret[2] = BitConverter.GetBytes(num)[2];
-            }
-            else
-            {
-                ret[0] = BitConverter.GetBytes(num)[2];
-                ret[1] = BitConverter.GetBytes(num)[1];
-                ret[2] = BitConverter.GetBytes(num)[0];
-            }
-            return ret;
-        }
-        public static byte[] Universal(long num, bool littleEndian, bool bitsReversed, byte byteCount)
+       
+        static byte[] Universal(long num, bool littleEndian, bool bitsReversed, byte byteCount)
         {
             byte[] ret = new byte[byteCount];
             byte[] numberBytes = BitConverter.GetBytes(num);
