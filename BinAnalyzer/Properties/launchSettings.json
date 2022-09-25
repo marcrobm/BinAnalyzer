@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "BinAnalyzer": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Users\\mmajo\\Desktop\\MemHome.rom"
+    }
+  }
+}
