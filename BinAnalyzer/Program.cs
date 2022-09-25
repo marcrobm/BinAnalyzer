@@ -1,5 +1,7 @@
 ﻿using System;
 using System.IO;
+using TI30XDev;
+
 namespace BinAnalyzer
 {
     class Program
@@ -11,6 +13,7 @@ namespace BinAnalyzer
             "findOF [max]  -find the offset and number format used in the binary to reference strings\n" +
             "load [path]   -load a different file\n" +
             "clear         -clears screen\n" +
+            "getFormats    -displays all available/recognizable formats\n" +
             "---------------------------------------------------------------------------------------\n";
         static void Main(string[] args)
         {
@@ -88,6 +91,12 @@ namespace BinAnalyzer
                         else
                         {
                             Console.WriteLine("The specified file does not exist, keeping old file loaded");
+                        }
+                        break;
+                    case "getFormats":
+                        foreach(var f in NumFormats.formats)
+                        {
+                            Console.WriteLine("  "+f.Key);
                         }
                         break;
                     case "clear":
