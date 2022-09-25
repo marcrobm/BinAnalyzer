@@ -10,7 +10,7 @@ namespace BinAnalyzer
             "exit          -exit programm\n" +
             "findOF [max]  -find the offset and number format used in the binary to reference strings\n" +
             "load [path]   -load a different file\n" +
-            "clear         -clears screen" +
+            "clear         -clears screen\n" +
             "---------------------------------------------------------------------------------------\n";
         static void Main(string[] args)
         {
