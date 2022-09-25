@@ -68,7 +68,7 @@ namespace BinAnalyzer
                         break;
                     case "findOF":
                         var res = analyzer.FindNumberFormatAndOffset(0, int.Parse(cargs[1]), 1, 8);
-                        Console.WriteLine("The most likeley format is {0} with offset {1:X}(hex)", res.format, res.offset);
+                        Console.WriteLine("The most likely format is {0} with offset {1:X}(hex)", res.format, res.offset);
                         break;
                     case "load":
                         if (File.Exists(cargs[1]))
