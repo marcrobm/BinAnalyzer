@@ -97,27 +97,34 @@ namespace BinAnalyzer
         /// <param name="numberFormat"> A Method on how to turn the numbers into binary (found in NumberFormats)</param>
         /// <returns> Dict(offset,Dict(address,List(referencedBy)))
         /// </returns>
-        Dictionary<int, ReferencesFromAddr> FindAllReferencesForAllOffsets(int minOffset, int maxOffset, int stepSize, List<ulong> numbers, bool debug, Func<long, byte[]> numberFormat)
+        Dictionary<ulong, ReferencesFromAddr> FindAllReferencesForAllOffsets(int minOffset, int maxOffset, int stepSize, List<ulong> numbers, bool debug, Func<long, byte[]> numberFormat)
         {
-            Dictionary<int, ReferencesFromAddr> ReferencesPerOffset = new Dictionary<int, ReferencesFromAddr>();
+            Dictionary<ulong, ReferencesFromAddr> ReferencesPerOffset = new Dictionary<ulong, ReferencesFromAddr>();
             var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            int currentOffset = minOffset;
+            ulong currentOffset = (ulong)minOffset;
             long lastDebugOutputMillis = 0;
             // for every offset
-            while (currentOffset <= maxOffset)
+            while (currentOffset <= (ulong)maxOffset)
             {
                 // find the total number of times one of the provided numbers appear in the rom
-                ReferencesPerOffset.Add(currentOffset, FindReferences(rom, numbers, numberFormat, currentOffset));
-                currentOffset += stepSize;
+                ReferencesPerOffset.Add(currentOffset, FindReferences(rom, numbers, numberFormat, (int)currentOffset));
                 if (debug && lastDebugOutputMillis < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500)
                 {
                     lastDebugOutputMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     var timeSinceStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start;
-                    var processedOffsets = (currentOffset - minOffset);
-                    double percentageDone = (double)processedOffsets / (double)(maxOffset - minOffset);
-                    Console.WriteLine("  processing: {0} progress:{1:0.00} eta:{2}", currentOffset,percentageDone * 100,DateTimeOffset.FromUnixTimeMilliseconds((long)(((double)processedOffsets / (((maxOffset - minOffset) / (double)stepSize)) * (double)timeSinceStart + start))).LocalDateTime);
+
+                    double processedOffsets = currentOffset - (ulong)minOffset;
+                    double totalOffsets = maxOffset - minOffset;
+                    double leftOffsets = totalOffsets - processedOffsets;
+                    double percentageDone = processedOffsets / totalOffsets + 0.0001;
+                    double percentageLeft = leftOffsets / totalOffsets;
+                    double estimatedTotalProcessingTime = (timeSinceStart / percentageDone);
+                    double estimatedRemainingProcessingTime = estimatedTotalProcessingTime * percentageLeft;
+                    DateTime expectedFinish = DateTimeOffset.FromUnixTimeMilliseconds((long)estimatedRemainingProcessingTime + start).LocalDateTime;
+                    Console.WriteLine("  processing: {0} progress:{1:0.00}% eta:{2}", currentOffset,percentageDone * 100, expectedFinish);
                     Console.SetCursorPosition(0, Console.CursorTop - 1);
                 }
+                currentOffset += (ulong)stepSize;
             }
             return ReferencesPerOffset;
         }
@@ -131,7 +138,7 @@ namespace BinAnalyzer
         /// <param name="minStrLength"></param>
         /// <param name="numFormat"></param>
         /// <returns>offset,matches</returns>
-        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution)
+        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=false)
         {
             Mutex offsetToReferencesMTX = new Mutex();
             Dictionary<ulong, ReferencesFromAddr> offsetToReferences = new Dictionary<ulong, ReferencesFromAddr>();
@@ -139,13 +146,20 @@ namespace BinAnalyzer
             // for each offset, find the locations referencing every string
             int scanSizePerThread = (max - min) / step / Environment.ProcessorCount;
             var stringLocations = new List<ulong>(foundStrings.Keys);
-            Parallel.For(0, Environment.ProcessorCount, delegate (int i)
+            if (multiThreaded)
             {
-                var tmp = FindAllReferencesForAllOffsets(min + scanSizePerThread * i, min + scanSizePerThread * (i + 1) - 1, step, stringLocations, i == 0, numFormat.Value);
-                offsetToReferencesMTX.WaitOne();
-                tmp.ToList().ForEach(x => offsetToReferences.Add((ulong)x.Key, x.Value));
-                offsetToReferencesMTX.ReleaseMutex();
-            });
+                Parallel.For(0, Environment.ProcessorCount, delegate (int i)
+                {
+                    var tmp = FindAllReferencesForAllOffsets(min + scanSizePerThread * i, min + scanSizePerThread * (i + 1) - 1, step, stringLocations, i == 0, numFormat.Value);
+                    offsetToReferencesMTX.WaitOne();
+                    tmp.ToList().ForEach(x => offsetToReferences.Add((ulong)x.Key, x.Value));
+                    offsetToReferencesMTX.ReleaseMutex();
+                });
+            }
+            else
+            {
+                offsetToReferences = FindAllReferencesForAllOffsets(min, max, step, stringLocations, true, numFormat.Value);
+            }
             // presumably! the correct offset is the one where the most strings actually get referenced
             var maxRefs = offsetToReferences.Aggregate((l, r) => TotalValueItemsCount(l.Value, maxKeyAttribution) > TotalValueItemsCount(r.Value, maxKeyAttribution) ? l : r);
             ulong bestOffset = (ulong)maxRefs.Key;
