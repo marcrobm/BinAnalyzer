@@ -108,7 +108,7 @@ namespace BinAnalyzer
             {
                 // find the total number of times one of the provided numbers appear in the rom
                 ReferencesPerOffset.Add(currentOffset, FindReferences(rom, numbers, numberFormat, (int)currentOffset));
-                if (debug && lastDebugOutputMillis < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500)
+                if (debug && lastDebugOutputMillis < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500 && currentOffset != (ulong)minOffset)
                 {
                     lastDebugOutputMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     var timeSinceStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start;
@@ -116,7 +116,7 @@ namespace BinAnalyzer
                     double processedOffsets = currentOffset - (ulong)minOffset;
                     double totalOffsets = maxOffset - minOffset;
                     double leftOffsets = totalOffsets - processedOffsets;
-                    double percentageDone = processedOffsets / totalOffsets + 0.0001;
+                    double percentageDone = processedOffsets / totalOffsets;
                     double percentageLeft = leftOffsets / totalOffsets;
                     double estimatedTotalProcessingTime = (timeSinceStart / percentageDone);
                     double estimatedRemainingProcessingTime = estimatedTotalProcessingTime * percentageLeft;
@@ -138,7 +138,7 @@ namespace BinAnalyzer
         /// <param name="minStrLength"></param>
         /// <param name="numFormat"></param>
         /// <returns>offset,matches</returns>
-        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=false)
+        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=true)
         {
             Mutex offsetToReferencesMTX = new Mutex();
             Dictionary<ulong, ReferencesFromAddr> offsetToReferences = new Dictionary<ulong, ReferencesFromAddr>();
