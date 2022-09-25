@@ -9,16 +9,26 @@ using TI30XDev;
 
 namespace BinAnalyzer
 {
+    using ReferencesFromAddr = Dictionary<UInt32, List<UInt32>>; // Key: addr, Value: references
+
     public class Analyzer
     {
-        Dictionary<int, Dictionary<UInt32, List<UInt32>>>[] offsetToReferencesTable;
         byte[] rom;
-        Dictionary<UInt32, string> foundStrings;
+        Dictionary<ulong, string> foundStrings;
         Mutex writeLock = new Mutex(); // locks console printing
-        public Analyzer(string path)
+
+        public Analyzer(string path, int maxStringsToConsider = 20)
         {
             rom = File.ReadAllBytes(path);
-            foundStrings = FindStrings(30);
+            foundStrings = FindStrings(maxStringsToConsider);
+        }
+
+
+        public struct RefType
+        {
+            public string format;
+            public ulong offset;
+            public ulong uniqueMatches;
         }
         /// <summary>
         /// 
@@ -28,23 +38,19 @@ namespace BinAnalyzer
         /// <param name="step"></param>
         /// <param name="minStrLength"></param>
         /// <returns>format, offset</returns>
-        public Tuple<string, int> FindNumberFormatAndOffset(int minOffset, int maxOffset, int step, int minStrLength)
+        public RefType FindNumberFormatAndOffset(int minOffset, int maxOffset, int step, int minStrLength)
         {
-            int mostMatches = 0;
-            int bestOffset = 0;
-            string bestformat = "unknown";
+            RefType bestMatch = new RefType { format = "unknown", offset = 0, uniqueMatches = 0 };
             foreach (var format in NumFormats.formats)
             {
                 Console.WriteLine("Now testing " + format.Key);
-                var result = findOffset(minOffset, maxOffset, step, format.Value, 1);
-                if (result.Item2 > mostMatches)
+                var result = findOffset(minOffset, maxOffset, step, format, 1);
+                if (result.uniqueMatches > bestMatch.uniqueMatches)
                 {
-                    mostMatches = result.Item2;
-                    bestOffset = result.Item1;
-                    bestformat = format.Key;
+                    bestMatch = result;
                 }
             }
-            return new Tuple<string, int>(bestformat, bestOffset);
+            return bestMatch;
         }
 
         /// <summary>
@@ -52,12 +58,12 @@ namespace BinAnalyzer
         /// </summary>
         /// <param name="minStrLength">the minimum length required for a string to be recognized</param>
         /// <returns>A dictionary which maps an address to a found string </returns>
-        public Dictionary<UInt32, String> FindStrings(int maxStrings = int.MaxValue, int minStrLength = 5, double minEntropy = 0.3, double maxEntropy = 0.5)
+        public Dictionary<ulong, String> FindStrings(int maxStrings = int.MaxValue, int minStrLength = 5, double minEntropy = 0.3, double maxEntropy = 0.5)
         {
-            Dictionary<UInt32, string> found = new Dictionary<UInt32, string>();
-            UInt32 pos = 0;
+            Dictionary<ulong, string> found = new Dictionary<ulong, string>();
+            ulong pos = 0;
             string currentString = "";
-            while (pos < rom.Length)
+            while (pos < (ulong)rom.Length)
             {
                 if (isAsci(rom[pos]))
                 {
@@ -70,7 +76,7 @@ namespace BinAnalyzer
                         double strEntropy = getEntropy(Encoding.ASCII.GetBytes(currentString));
                         if (strEntropy >= minEntropy && strEntropy <= maxEntropy)
                         {
-                            found.Add((UInt32)(pos - currentString.Length), currentString);
+                            found.Add((pos - (ulong)currentString.Length), currentString);
                         }
                     }
                     currentString = "";
@@ -91,9 +97,9 @@ namespace BinAnalyzer
         /// <param name="numberFormat"> A Method on how to turn the numbers into binary (found in NumberFormats)</param>
         /// <returns> Dict(offset,Dict(address,List(referencedBy)))
         /// </returns>
-        Dictionary<int, Dictionary<UInt32, List<UInt32>>> FindAllReferencesForAllOffsets(int minOffset, int maxOffset, int stepSize, List<UInt32> numbers, bool debug, Func<long, byte[]> numberFormat)
+        Dictionary<int, ReferencesFromAddr> FindAllReferencesForAllOffsets(int minOffset, int maxOffset, int stepSize, List<ulong> numbers, bool debug, Func<long, byte[]> numberFormat)
         {
-            Dictionary<int, Dictionary<UInt32, List<UInt32>>> ReferencesPerOffset = new Dictionary<int, Dictionary<UInt32, List<UInt32>>>();
+            Dictionary<int, ReferencesFromAddr> ReferencesPerOffset = new Dictionary<int, ReferencesFromAddr>();
             var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             int currentOffset = minOffset;
             long lastDebugOutputMillis = 0;
@@ -107,10 +113,9 @@ namespace BinAnalyzer
                 {
                     lastDebugOutputMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     var timeSinceStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start;
-                    var processedOffsets = (currentOffset - minOffset) / stepSize;
-                    var leftToProcess = (maxOffset - minOffset) / stepSize - processedOffsets;
-                    Console.WriteLine("  processing:" + currentOffset +
-                     " eta:" + DateTimeOffset.FromUnixTimeMilliseconds((leftToProcess / processedOffsets) * timeSinceStart + start).LocalDateTime);
+                    var processedOffsets = (currentOffset - minOffset);
+                    double percentageDone = (double)processedOffsets / (double)(maxOffset - minOffset);
+                    Console.WriteLine("  processing: {0} progress:{1:0.00} eta:{2}", currentOffset,percentageDone * 100,DateTimeOffset.FromUnixTimeMilliseconds((long)(((double)processedOffsets / (((maxOffset - minOffset) / (double)stepSize)) * (double)timeSinceStart + start))).LocalDateTime);
                     Console.SetCursorPosition(0, Console.CursorTop - 1);
                 }
             }
@@ -118,7 +123,7 @@ namespace BinAnalyzer
         }
 
         /// <summary>
-        /// 
+        /// Finds the amount of times a string gets referenced for each offset
         /// </summary>
         /// <param name="min"></param>
         /// <param name="max"></param>
@@ -126,54 +131,58 @@ namespace BinAnalyzer
         /// <param name="minStrLength"></param>
         /// <param name="numFormat"></param>
         /// <returns>offset,matches</returns>
-        public Tuple<int, int> findOffset(int min, int max, int step, Func<long, byte[]> numFormat, int maxKeyAttribution)
+        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution)
         {
             Mutex offsetToReferencesMTX = new Mutex();
-            Dictionary<int, Dictionary<UInt32, List<UInt32>>> offsetToReferences = new Dictionary<int, Dictionary<UInt32, List<UInt32>>>();
+            Dictionary<ulong, ReferencesFromAddr> offsetToReferences = new Dictionary<ulong, ReferencesFromAddr>();
 
             // for each offset, find the locations referencing every string
             int scanSizePerThread = (max - min) / step / Environment.ProcessorCount;
-            var stringLocations = new List<UInt32>(foundStrings.Keys);
+            var stringLocations = new List<ulong>(foundStrings.Keys);
             Parallel.For(0, Environment.ProcessorCount, delegate (int i)
             {
-                var tmp = FindAllReferencesForAllOffsets(min + scanSizePerThread * i, min + scanSizePerThread * (i + 1) - 1, step, stringLocations, i == 0, numFormat);
+                var tmp = FindAllReferencesForAllOffsets(min + scanSizePerThread * i, min + scanSizePerThread * (i + 1) - 1, step, stringLocations, i == 0, numFormat.Value);
                 offsetToReferencesMTX.WaitOne();
-                tmp.ToList().ForEach(x => offsetToReferences.Add(x.Key, x.Value));
+                tmp.ToList().ForEach(x => offsetToReferences.Add((ulong)x.Key, x.Value));
                 offsetToReferencesMTX.ReleaseMutex();
             });
             // presumably! the correct offset is the one where the most strings actually get referenced
             var maxRefs = offsetToReferences.Aggregate((l, r) => TotalValueItemsCount(l.Value, maxKeyAttribution) > TotalValueItemsCount(r.Value, maxKeyAttribution) ? l : r);
-            int bestOffset = maxRefs.Key;
-            int maxStringsReferenced = TotalValueItemsCount(maxRefs.Value,1);
+            ulong bestOffset = (ulong)maxRefs.Key;
+            ulong maxStringsReferenced = (ulong)TotalValueItemsCount(maxRefs.Value, 1);
 
             writeLock.WaitOne();
             // print out information about the best fit (10 most referenced strings)
-            Console.WriteLine("Observed a maxiumum of " + maxStringsReferenced +"/"+foundStrings.Count() +" strings referenced using offset:" + bestOffset);
-            foreach (var str in offsetToReferences[bestOffset].OrderBy(x => -x.Value.Count).Take(10))
+            Console.WriteLine("Observed a maxiumum of {0}/{1} strings referenced using offset:{2:X}(hex)", maxStringsReferenced, foundStrings.Count(), bestOffset);
+            foreach (var str in offsetToReferences[bestOffset].Where(x => x.Value.Count>0).OrderBy(x => -x.Value.Count).Take(15))
             {
-                Console.WriteLine("String: {0} at addr {1:X8} got referenced {2} times",foundStrings[str.Key],str.Key,str.Value.Count());
+                Console.WriteLine("String: {0} at addr {1:X8} got referenced {2} times", foundStrings[str.Key], str.Key, str.Value.Count());
             }
             // print out the next biggest numbers of references made (so that it is visible if there is a sharp
             // decrease compared to the first one indicating that it was not just by chance) 
-            var sortedOffsets = offsetToReferences.OrderBy(x => -TotalValueItemsCount(x.Value, maxKeyAttribution));
+            var sortedOffsets = offsetToReferences.OrderBy(x => -TotalValueItemsCount(x.Value, maxKeyAttribution)).Where(x=> TotalValueItemsCount(x.Value, 1)>0).Take(5);
             Console.WriteLine("offset | references | uniqueStringsReferenced");
-            for (int i = 0; i < 15 && i < sortedOffsets.Count(); i++)
+            foreach (var reference in sortedOffsets)
             {
-                Console.WriteLine(sortedOffsets.ElementAt(i).Key + " | " + TotalValueItemsCount(sortedOffsets.ElementAt(i).Value, int.MaxValue) + " | " + TotalValueItemsCount(sortedOffsets.ElementAt(i).Value, 1));
+                Console.WriteLine(reference.Key + " | " + TotalValueItemsCount(reference.Value, int.MaxValue) + " | " + TotalValueItemsCount(reference.Value, 1));
             }
             writeLock.ReleaseMutex();
-            return new Tuple<int, int>(maxRefs.Key, maxStringsReferenced);
+            return new RefType() { format = numFormat.Key, offset = bestOffset, uniqueMatches = maxStringsReferenced };
         }
 
-
+        public struct Reference
+        {
+            public long addr;       // the address to which is pointed
+            public long reference;  // the location where addr was found (which references addr)
+        }
         /// <summary>
         /// For each address find the referencing memory locations
         /// </summary>
         /// <param name="addr">the address to be referenced</param>
         /// <param name="addrToBits">a NumberFormat</param>
         /// <param name="offset">the offet to apply to the address</param>
-        /// <returns></returns>
-        Dictionary<UInt32, List<UInt32>> FindReferences(byte[] rom, List<UInt32> addresses, Func<long, byte[]> addrToBits, int offset)
+        /// <returns>key:address,Value:refferences</returns>
+        ReferencesFromAddr FindReferences(byte[] rom, List<ulong> addresses, Func<long, byte[]> addrToBits, int offset)
         {
             //addr,List<referencingPositions>
             Dictionary<UInt32, List<UInt32>> references = new Dictionary<UInt32, List<UInt32>>();
@@ -190,7 +199,7 @@ namespace BinAnalyzer
         /// <param name="addr">the address to be referenced</param>
         /// <param name="addrToBits">a NumberFormat</param>
         /// <param name="offset">the offet to apply to the address</param>
-        /// <returns></returns>
+        /// <returns>A list of all memory locations where addr is referenced</returns>
         List<UInt32> FindReferences(UInt32 addr, Func<long, byte[]> addrToBits, int offset)
         {
             List<UInt32> references = new List<UInt32>();
