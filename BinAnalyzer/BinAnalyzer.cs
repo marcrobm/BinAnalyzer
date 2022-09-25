@@ -120,7 +120,7 @@ namespace BinAnalyzer
                     double percentageLeft = leftOffsets / totalOffsets;
                     double estimatedTotalProcessingTime = (timeSinceStart / percentageDone);
                     double estimatedRemainingProcessingTime = estimatedTotalProcessingTime * percentageLeft;
-                    DateTime expectedFinish = DateTimeOffset.FromUnixTimeMilliseconds((long)estimatedRemainingProcessingTime + start).LocalDateTime;
+                    DateTime expectedFinish = DateTimeOffset.FromUnixTimeMilliseconds((long)estimatedRemainingProcessingTime + start + timeSinceStart).LocalDateTime;
                     Console.WriteLine("  processing: {0} progress:{1:0.00}% eta:{2}", currentOffset,percentageDone * 100, expectedFinish);
                     Console.SetCursorPosition(0, Console.CursorTop - 1);
                 }
@@ -235,6 +235,7 @@ namespace BinAnalyzer
                             references.Add((UInt32)(pos - matchedBytes));
                         }
                         nZero = false;
+                        pos -= matchedBytes;
                         matchedBytes = 0;
                     }
                     else
