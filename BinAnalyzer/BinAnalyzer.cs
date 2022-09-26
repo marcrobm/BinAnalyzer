@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using TI30XDev;
 
 namespace BinAnalyzer
@@ -29,6 +30,7 @@ namespace BinAnalyzer
             public string format;
             public ulong offset;
             public ulong uniqueMatches;
+            public double certainty; // estimated percentage of real (not random) references
         }
         /// <summary>
         /// 
@@ -44,11 +46,12 @@ namespace BinAnalyzer
             foreach (var format in NumFormats.formats)
             {
                 Console.WriteLine("Now testing " + format.Key);
-                var result = findOffset(minOffset, maxOffset, step, format, 1);
-                if (result.uniqueMatches > bestMatch.uniqueMatches)
+                var result = findOffset((ulong)minOffset, (ulong)maxOffset, step, format, 1);
+                if (result.certainty>0.6?(result.certainty > bestMatch.certainty):result.uniqueMatches>bestMatch.uniqueMatches)
                 {
                     bestMatch = result;
                 }
+                Console.WriteLine("  certainty:"+result.certainty);
             }
             return bestMatch;
         }
@@ -90,7 +93,7 @@ namespace BinAnalyzer
         /// Finds 
         /// </summary>
         /// <param name="minOffset"> The minimum offset applied to numbers</param>
-        /// <param name="maxOffset"> The maximum offset applied to numbers</param>
+        /// <param name="maxOffset"> The maximum (inclusive) offset applied to numbers</param>
         /// <param name="stepSize"> The granuality at which to calculate the offset (2 => Offset%2=0 etc)</param>
         /// <param name="numbers"> The addresses (string locations) to search for</param>
         /// <param name="debug"> Wheather or not to print debug messages</param>
@@ -138,19 +141,17 @@ namespace BinAnalyzer
         /// <param name="minStrLength"></param>
         /// <param name="numFormat"></param>
         /// <returns>offset,matches</returns>
-        public RefType findOffset(int min, int max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=true)
+        public RefType findOffset(ulong min, ulong max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=true)
         {
             Mutex offsetToReferencesMTX = new Mutex();
             Dictionary<ulong, ReferencesFromAddr> offsetToReferences = new Dictionary<ulong, ReferencesFromAddr>();
-
-            // for each offset, find the locations referencing every string
-            int scanSizePerThread = (max - min) / step / Environment.ProcessorCount;
             var stringLocations = new List<ulong>(foundStrings.Keys);
             if (multiThreaded)
             {
-                Parallel.For(0, Environment.ProcessorCount, delegate (int i)
+                var ranges = Utils.buildIntervals(min, max, (ulong)Math.Min((double)Environment.ProcessorCount,max-min+1));
+                Parallel.ForEach(ranges, range =>
                 {
-                    var tmp = FindAllReferencesForAllOffsets(min + scanSizePerThread * i, min + scanSizePerThread * (i + 1) - 1, step, stringLocations, i == 0, numFormat.Value);
+                    var tmp = FindAllReferencesForAllOffsets((int)range.Item2,(int)range.Item3, step, stringLocations, range.Item1==0, numFormat.Value);
                     offsetToReferencesMTX.WaitOne();
                     tmp.ToList().ForEach(x => offsetToReferences.Add((ulong)x.Key, x.Value));
                     offsetToReferencesMTX.ReleaseMutex();
@@ -158,7 +159,11 @@ namespace BinAnalyzer
             }
             else
             {
-                offsetToReferences = FindAllReferencesForAllOffsets(min, max, step, stringLocations, true, numFormat.Value);
+                offsetToReferences = FindAllReferencesForAllOffsets((int)min, (int)max, step, stringLocations, true, numFormat.Value);
+            }
+            if (offsetToReferences.Count == 0)
+            {
+                return new RefType() { format = numFormat.Key, offset = 0, uniqueMatches = 0, certainty = 0 };
             }
             // presumably! the correct offset is the one where the most strings actually get referenced
             var maxRefs = offsetToReferences.Aggregate((l, r) => TotalValueItemsCount(l.Value, maxKeyAttribution) > TotalValueItemsCount(r.Value, maxKeyAttribution) ? l : r);
@@ -181,8 +186,12 @@ namespace BinAnalyzer
                 Console.WriteLine(reference.Key + " | " + TotalValueItemsCount(reference.Value, int.MaxValue) + " | " + TotalValueItemsCount(reference.Value, 1));
             }
             writeLock.ReleaseMutex();
-            return new RefType() { format = numFormat.Key, offset = bestOffset, uniqueMatches = maxStringsReferenced };
+            // we count up to 15 references of a string, more are probably not that certain
+            double certainty = TotalValueItemsCount(maxRefs.Value, 15) / (NumFormats.expectedNumberOfOccurences(rom.LongLength, numFormat.Key) * foundStrings.Count() + (ulong)TotalValueItemsCount(maxRefs.Value, 15));
+            return new RefType() { format = numFormat.Key, offset = bestOffset, uniqueMatches = maxStringsReferenced,certainty=certainty };
         }
+
+       
 
         public struct Reference
         {
