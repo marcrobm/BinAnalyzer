@@ -26,16 +26,32 @@ namespace TI30XDev
             formats.Add("BigEndian32", num => Universal(num, false, false, 4));
             formats.Add("BigEndian32Rev", num => Universal(num, false, true, 4));
         }
-       
+
         static byte[] Universal(long num, bool littleEndian, bool bitsReversed, byte byteCount)
         {
             byte[] ret = new byte[byteCount];
             byte[] numberBytes = BitConverter.GetBytes(num);
-            for(int i = 0; i < ret.Count(); i++)
+            for (int i = 0; i < ret.Count(); i++)
             {
                 ret[i] = bitsReversed ? reverseBitOrder(numberBytes[i]) : numberBytes[i];
             }
-            return (BitConverter.IsLittleEndian==littleEndian)?ret: reverseByteOrder(ret);
+            return (BitConverter.IsLittleEndian == littleEndian) ? ret : reverseByteOrder(ret);
+        }
+        /// <summary>
+        /// This estimates the probability to see sequence of patternLength bytes in the data
+        /// This assumes that the data is independant (entropy=1), but in reality entropy is ~0.6
+        /// so this might tend to be on the smaller side
+        /// </summary>
+        /// <param name="dataLength"></param>
+        /// <param name=""></param>
+        /// <returns></returns>
+        public static double expectedNumberOfOccurences(long dataLength, int patternLength)
+        {
+            return (dataLength - patternLength) / Math.Pow(256.0, patternLength);
+        }
+        public static double expectedNumberOfOccurences(long dataLength,string format)
+        {
+            return expectedNumberOfOccurences(dataLength, formats[format](0).Length);
         }
         static byte[] reverseByteOrder(byte[] inp)
         {
