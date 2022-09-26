@@ -28,7 +28,7 @@ namespace BinAnalyzer
         public struct RefType
         {
             public string format;
-            public ulong offset;
+            public long offset;
             public ulong uniqueMatches;
             public double certainty; // estimated percentage of real (not random) references
         }
@@ -40,20 +40,26 @@ namespace BinAnalyzer
         /// <param name="step"></param>
         /// <param name="minStrLength"></param>
         /// <returns>format, offset</returns>
-        public RefType FindNumberFormatAndOffset(int minOffset, int maxOffset, int step, int minStrLength)
+        public RefType FindNumberFormatAndOffset(long minOffset, long maxOffset, int step, int minStrLength)
         {
             RefType bestMatch = new RefType { format = "unknown", offset = 0, uniqueMatches = 0 };
+            List<RefType> results = new List<RefType>();
             foreach (var format in NumFormats.formats)
             {
                 Console.WriteLine("Now testing " + format.Key);
-                var result = findOffset((ulong)minOffset, (ulong)maxOffset, step, format, 1);
-                if (result.certainty>0.6?(result.certainty > bestMatch.certainty):result.uniqueMatches>bestMatch.uniqueMatches)
-                {
-                    bestMatch = result;
-                }
+                var result = findOffset(minOffset, maxOffset, step, format, 1);
+                results.Add(result);
                 Console.WriteLine("  certainty:"+result.certainty);
             }
-            return bestMatch;
+            var reasonable = results.Where(x => x.certainty > 0.4);
+            if (reasonable.Count() > 0)
+            {
+                return reasonable.OrderBy(r => -(long)r.uniqueMatches).First();
+            }
+            else
+            {
+                return results.OrderBy(r => -r.certainty).First();
+            }
         }
 
         /// <summary>
@@ -100,23 +106,23 @@ namespace BinAnalyzer
         /// <param name="numberFormat"> A Method on how to turn the numbers into binary (found in NumberFormats)</param>
         /// <returns> Dict(offset,Dict(address,List(referencedBy)))
         /// </returns>
-        Dictionary<ulong, ReferencesFromAddr> FindAllReferencesForAllOffsets(int minOffset, int maxOffset, int stepSize, List<ulong> numbers, bool debug, Func<long, byte[]> numberFormat)
+        Dictionary<long, ReferencesFromAddr> FindAllReferencesForAllOffsets(long minOffset, long maxOffset, int stepSize, List<ulong> numbers, bool debug, Func<long, byte[]> numberFormat)
         {
-            Dictionary<ulong, ReferencesFromAddr> ReferencesPerOffset = new Dictionary<ulong, ReferencesFromAddr>();
+            Dictionary<long, ReferencesFromAddr> ReferencesPerOffset = new Dictionary<long, ReferencesFromAddr>();
             var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            ulong currentOffset = (ulong)minOffset;
+            long currentOffset = minOffset;
             long lastDebugOutputMillis = 0;
             // for every offset
-            while (currentOffset <= (ulong)maxOffset)
+            while (currentOffset <= maxOffset)
             {
                 // find the total number of times one of the provided numbers appear in the rom
                 ReferencesPerOffset.Add(currentOffset, FindReferences(rom, numbers, numberFormat, (int)currentOffset));
-                if (debug && lastDebugOutputMillis < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500 && currentOffset != (ulong)minOffset)
+                if (debug && lastDebugOutputMillis < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500 && currentOffset != minOffset)
                 {
                     lastDebugOutputMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     var timeSinceStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start;
 
-                    double processedOffsets = currentOffset - (ulong)minOffset;
+                    double processedOffsets = currentOffset - minOffset;
                     double totalOffsets = maxOffset - minOffset;
                     double leftOffsets = totalOffsets - processedOffsets;
                     double percentageDone = processedOffsets / totalOffsets;
@@ -124,10 +130,10 @@ namespace BinAnalyzer
                     double estimatedTotalProcessingTime = (timeSinceStart / percentageDone);
                     double estimatedRemainingProcessingTime = estimatedTotalProcessingTime * percentageLeft;
                     DateTime expectedFinish = DateTimeOffset.FromUnixTimeMilliseconds((long)estimatedRemainingProcessingTime + start + timeSinceStart).LocalDateTime;
-                    Console.WriteLine("  processing: {0} progress:{1:0.00}% eta:{2}", currentOffset,percentageDone * 100, expectedFinish);
+                    Console.WriteLine("  progress:{1:0.00}% eta:{2}", currentOffset,percentageDone * 100, expectedFinish);
                     Console.SetCursorPosition(0, Console.CursorTop - 1);
                 }
-                currentOffset += (ulong)stepSize;
+                currentOffset += stepSize;
             }
             return ReferencesPerOffset;
         }
@@ -141,19 +147,19 @@ namespace BinAnalyzer
         /// <param name="minStrLength"></param>
         /// <param name="numFormat"></param>
         /// <returns>offset,matches</returns>
-        public RefType findOffset(ulong min, ulong max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=true)
+        public RefType findOffset(long min, long max, int step, KeyValuePair<string, Func<long, byte[]>> numFormat, int maxKeyAttribution,bool multiThreaded=true)
         {
             Mutex offsetToReferencesMTX = new Mutex();
-            Dictionary<ulong, ReferencesFromAddr> offsetToReferences = new Dictionary<ulong, ReferencesFromAddr>();
+            Dictionary<long, ReferencesFromAddr> offsetToReferences = new Dictionary<long, ReferencesFromAddr>();
             var stringLocations = new List<ulong>(foundStrings.Keys);
             if (multiThreaded)
             {
-                var ranges = Utils.buildIntervals(min, max, (ulong)Math.Min((double)Environment.ProcessorCount,max-min+1));
+                var ranges = Utils.buildIntervals(min, max, (long)Math.Min((double)Environment.ProcessorCount,max-min+1));
                 Parallel.ForEach(ranges, range =>
                 {
                     var tmp = FindAllReferencesForAllOffsets((int)range.Item2,(int)range.Item3, step, stringLocations, range.Item1==0, numFormat.Value);
                     offsetToReferencesMTX.WaitOne();
-                    tmp.ToList().ForEach(x => offsetToReferences.Add((ulong)x.Key, x.Value));
+                    tmp.ToList().ForEach(x => offsetToReferences.Add(x.Key, x.Value));
                     offsetToReferencesMTX.ReleaseMutex();
                 });
             }
@@ -167,13 +173,13 @@ namespace BinAnalyzer
             }
             // presumably! the correct offset is the one where the most strings actually get referenced
             var maxRefs = offsetToReferences.Aggregate((l, r) => TotalValueItemsCount(l.Value, maxKeyAttribution) > TotalValueItemsCount(r.Value, maxKeyAttribution) ? l : r);
-            ulong bestOffset = (ulong)maxRefs.Key;
+            long bestOffset = maxRefs.Key;
             ulong maxStringsReferenced = (ulong)TotalValueItemsCount(maxRefs.Value, 1);
 
             writeLock.WaitOne();
             // print out information about the best fit (10 most referenced strings)
-            Console.WriteLine("Observed a maxiumum of {0}/{1} strings referenced using offset:{2:X}(hex)", maxStringsReferenced, foundStrings.Count(), bestOffset);
-            foreach (var str in offsetToReferences[bestOffset].Where(x => x.Value.Count>0).OrderBy(x => -x.Value.Count).Take(15))
+                Console.WriteLine("Observed a maxiumum of {0}/{1} strings referenced using offset:{2}(dec)", maxStringsReferenced, foundStrings.Count(), bestOffset);
+                foreach (var str in offsetToReferences[bestOffset].Where(x => x.Value.Count>0).OrderBy(x => -x.Value.Count).Take(30))
             {
                 Console.WriteLine("String: {0} at addr {1:X8} got referenced {2} times", foundStrings[str.Key], str.Key, str.Value.Count());
             }
