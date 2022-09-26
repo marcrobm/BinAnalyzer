@@ -7,13 +7,13 @@ namespace BinAnalyzer
     class Program
     {
         static string helpInformation = "----------------------------HELP-------------------------------------------------------\n" +
-            "help          -show this help page\n" +
-            "showStrings   -find all string in the binary and display them\n" +
-            "exit          -exit programm\n" +
-            "findOF [max]  -find the offset and number format used in the binary to reference strings\n" +
-            "load [path]   -load a different file\n" +
-            "clear         -clears screen\n" +
-            "getFormats    -displays all available/recognizable formats\n" +
+            "help                -show this help page\n" +
+            "showStrings         -find all string in the binary and display them\n" +
+            "exit                -exit programm\n" +
+            "findOF [min] [max]  -find the offset and number format used in the binary to reference strings\n" +
+            "load [path]         -load a different file\n" +
+            "clear               -clears screen\n" +
+            "getFormats          -displays all available/recognizable formats\n" +
             "---------------------------------------------------------------------------------------\n";
         static void Main(string[] args)
         {
@@ -70,8 +70,8 @@ namespace BinAnalyzer
                         }
                         break;
                     case "findOF":
-                        var res = analyzer.FindNumberFormatAndOffset(0, int.Parse(cargs[1]), 1, 8);
-                        Console.WriteLine("The most likely format is {0} with offset {1:X}(hex)", res.format, res.offset);
+                        var res = analyzer.FindNumberFormatAndOffset(long.Parse(cargs[1]), long.Parse(cargs[2]), 1, 8);
+                        Console.WriteLine("The most likely format is {0} with offset {1}(dec), {1:X8}(hex)", res.format, res.offset);
                         break;
                     case "load":
                         if (File.Exists(cargs[1]))
