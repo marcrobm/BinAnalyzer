@@ -1,5 +1,5 @@
 # BinAnalyzer
-A C# Console Programm which provides tools to semi-automatic ly find out the endianness and length in Bytes as well as offset used in a firmware file.
+A C# Console Programm which provides tools to semi-automaticly find out the endianness and length in Bytes as well as offset used in a firmware file.
 # How to use
 The program displays an overview of all commands.
 At first findStrings is most useful to see how many strings there are in the Binary.
